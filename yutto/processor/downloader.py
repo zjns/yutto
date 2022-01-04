@@ -8,7 +8,15 @@ from typing import Any, Coroutine, Optional, Union
 
 import aiohttp
 
-from yutto._typing import AudioUrlMeta, DownloaderOptions, EpisodeData, VideoUrlMeta
+from yutto._typing import (
+    AudioUrlMeta,
+    DownloaderOptions,
+    EpisodeData,
+    VideoUrlMeta,
+    SubtitleFileInfo,
+    MultiLangSubtitle,
+)
+from yutto.api.translate import translate
 from yutto.bilibili_typing.quality import audio_quality_map, video_quality_map
 from yutto.processor.progressbar import show_progress
 from yutto.processor.selector import select_audio, select_video
@@ -20,7 +28,7 @@ from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.file_buffer import AsyncFileBuffer
 from yutto.utils.funcutils import filter_none_value, xmerge
 from yutto.utils.metadata import write_metadata
-from yutto.utils.subtitle import write_subtitle
+from yutto.utils.subtitle import write_subtitle, SubtitleData
 
 
 def slice_blocks(
@@ -159,9 +167,86 @@ def merge_video_and_audio(
         ["-acodec", options["audio_save_codec"]] if audio is not None else [],
         # see also: https://www.reddit.com/r/ffmpeg/comments/qe7oq1/comment/hi0bmic/?utm_source=share&utm_medium=web2x&context=3
         ["-strict", "unofficial"],
+        ["-metadata:s:v:0", "VENDOR_ID="],
+        ["-metadata:s:a:0", "VENDOR_ID="],
         ["-threads", str(os.cpu_count())],
         ["-y", str(output_path)],
     ]
+
+    ffmpeg.exec(functools.reduce(lambda prev, cur: prev + cur, args_list))
+    Logger.info("合并完成！")
+
+    if video is not None:
+        os.remove(video_path)
+    if audio is not None:
+        os.remove(audio_path)
+
+
+def merge_video_and_audio_and_subtitles(
+    video: Optional[VideoUrlMeta],
+    video_path: Union[str, Path],
+    audio: Optional[AudioUrlMeta],
+    audio_path: Union[str, Path],
+    output_path: Union[str, Path],
+    subtitles: list[SubtitleFileInfo],
+    options: DownloaderOptions,
+):
+    """合并音视频和字幕"""
+
+    ffmpeg = FFmpeg()
+    Logger.info("开始合并……")
+
+    if video is not None and video["codec"] == options["video_save_codec"]:
+        options["video_save_codec"] = "copy"
+    if audio is not None and audio["codec"] == options["audio_save_codec"]:
+        options["audio_save_codec"] = "copy"
+
+    def default_subtitle():
+        for sub in subtitles:
+            if "zh-CN" == sub["info"]["lang_code"]:
+                return sub
+        for sub in subtitles:
+            if "zh" in sub["info"]["lang_code"]:
+                return sub
+        return subtitles[0]
+
+    def_sub = default_subtitle()
+    subtitles.remove(def_sub)
+    subtitles.insert(0, def_sub)
+
+    args_list: list[list[str]] = [
+        ["-i", str(video_path)] if video is not None else [],
+        ["-i", str(audio_path)] if audio is not None else [],
+    ]
+    index = -1
+    for sub in subtitles:
+        args_list.append(["-i", sub["path"]])
+    if video is not None:
+        index += 1
+        args_list.append(["-map", f"{index}"])
+        if audio is not None:
+            index += 1
+            args_list.append(["-map", f"{index}"])
+    elif audio is not None:
+        index += 1
+        args_list.append(["-map", f"{index}"])
+
+    args_list += [
+        ["-c:v", options["video_save_codec"]] if video is not None else [],
+        ["-c:a", options["audio_save_codec"]] if audio is not None else [],
+        ["-c:s", "copy"] if subtitles else [],
+        ["-disposition:s:0", "default"] if subtitles else [],
+        ["-metadata:s:v:0", "VENDOR_ID="],
+        ["-metadata:s:a:0", "VENDOR_ID="],
+        ["-threads", str(os.cpu_count())],
+    ]
+    for i, sub in enumerate(subtitles):
+        # 从0开始，选择第 input_index+i+1 个输入的所有轨道
+        # 例："-map 0:v:0"表示选择第0个输入的视频轨道的第0轨
+        args_list.append(["-map", str(index + i + 1)])
+        args_list.append([f"-metadata:s:s:{i}", "language=%s" % sub["info"]["lang_code"]])
+        args_list.append([f"-metadata:s:s:{i}", "title=%s" % sub["info"]["lang"]])
+    args_list.append(["-y", str(output_path)])
 
     ffmpeg.exec(functools.reduce(lambda prev, cur: prev + cur, args_list))
     Logger.info("合并完成！")
@@ -201,7 +286,7 @@ async def start_downloader(
     show_audios_info(audios, audios.index(audio) if audio is not None else -1)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_format = ".mp4"
+    output_format = ".mkv"
     if video is None:
         if audio is not None and audio["codec"] == "fLaC":
             output_format = ".flac"
@@ -222,19 +307,56 @@ async def start_downloader(
 
     if video is None and audio is None:
         Logger.warning("没有音视频需要下载")
-        return
+        # return
 
+    subtitle_files = list[SubtitleFileInfo]()
     # 保存字幕
-    if subtitles:
+    if options["no_subtitle"]:
+        Logger.custom("跳过字幕下载", badge=Badge("字幕", fore="black", back="yellow"))
+    elif subtitles:
+        video_path_no_ext = os.path.splitext(str(output_path))[0]
         for subtitle in subtitles:
+            subtitle_path = "{}_{}.srt".format(video_path_no_ext, subtitle["lang"])
+            subtitle_files.append({"info": subtitle, "path": subtitle_path})
             write_subtitle(subtitle["lines"], str(output_path), subtitle["lang"])
+        # 通过繁化姬基于繁中生成简中字幕
+        lang_codes = [sub["info"]["lang_code"] for sub in subtitle_files]
+        if "zh-CN" not in lang_codes and "zh-Hant" in lang_codes:
+            hant_sub_path = next((s for s in subtitle_files if s["info"]["lang_code"] == "zh-Hant"))["path"]
+            with open(hant_sub_path, "r", encoding="utf-8") as hant_file:
+                text = hant_file.read()
+                try:
+                    trans = await translate(text)
+                    hans_path = "{}_{}[{}].srt".format(video_path_no_ext, "中文（简体）", "翻译自繁体")
+                    with open(hans_path, "w", encoding="utf-8") as hans_file:
+                        hans_file.write(trans)
+                    hans_sub_info: MultiLangSubtitle = {
+                        "lang": "中文（简体）",
+                        "lang_code": "zh-CN",
+                        "lines": SubtitleData(),
+                    }
+                    subtitles.append(hans_sub_info)
+                    subtitle_files.append({"info": hans_sub_info, "path": hans_path})
+                    Logger.custom(
+                        "通过繁化姬基于繁体的简中字幕已生成",
+                        badge=Badge("字幕", fore="black", back="cyan"),
+                    )
+                except Exception:
+                    Logger.custom(
+                        "通过繁化姬基于繁体的简中字幕生成失败",
+                        badge=Badge("字幕", fore="black", back="red"),
+                    )
         Logger.custom(
-            "{} 字幕已全部生成".format(", ".join([subtitle["lang"] for subtitle in subtitles])),
+            "{}字幕已全部生成".format(", ".join([subtitle["lang"] for subtitle in subtitles])),
             badge=Badge("字幕", fore="black", back="cyan"),
         )
+    else:
+        Logger.custom("未发现字幕", badge=Badge("字幕", fore="black", back="red"))
 
     # 保存弹幕
-    if danmaku["data"]:
+    if options["no_danmaku"]:
+        Logger.custom("跳过弹幕下载", badge=Badge("弹幕", fore="black", back="yellow"))
+    elif (danmaku["save_type"] != "ass" or video is not None) and danmaku["data"]:
         write_danmaku(
             danmaku,
             str(output_path),
@@ -242,14 +364,31 @@ async def start_downloader(
             video["width"] if video is not None else 0,
         )
         Logger.custom("{} 弹幕已生成".format(danmaku["save_type"]).upper(), badge=Badge("弹幕", fore="black", back="cyan"))
+    elif danmaku["save_type"] == "ass" and danmaku["data"] and video is None:
+        Logger.custom("不下载视频无法生成 ASS 弹幕", badge=Badge("弹幕", fore="black", back="red"))
+    else:
+        Logger.custom("未发现弹幕", badge=Badge("弹幕", fore="black", back="red"))
 
     # 保存媒体描述文件
-    if metadata is not None:
+    if not options["with_metadata"]:
+        Logger.custom("跳过 NFO 媒体描述文件生成", badge=Badge("描述文件", fore="black", back="yellow"))
+    elif metadata is not None:
         write_metadata(metadata, str(output_path))
         Logger.custom("NFO 媒体描述文件已生成", badge=Badge("描述文件", fore="black", back="cyan"))
+    else:
+        Logger.custom("未发现 NFO 媒体描述文件", badge=Badge("描述文件", fore="black", back="red"))
+
+    if video is None and audio is None:
+        return
 
     # 下载视频 / 音频
     await download_video_and_audio(session, video, video_path, audio, audio_path, options)
 
-    # 合并视频 / 音频
-    merge_video_and_audio(video, video_path, audio, audio_path, output_path, options)
+    if not options["pack_subtitle"]:
+        Logger.custom("不往视频文件打包字幕", badge=Badge("字幕", fore="black", back="yellow"))
+        merge_video_and_audio(video, video_path, audio, audio_path, output_path, options)
+    elif subtitles:
+        merge_video_and_audio_and_subtitles(video, video_path, audio, audio_path, output_path, subtitle_files, options)
+    else:
+        # 合并视频 / 音频
+        merge_video_and_audio(video, video_path, audio, audio_path, output_path, options)

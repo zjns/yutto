@@ -234,6 +234,7 @@ async def get_ugc_video_subtitles(session: ClientSession, avid: AvId, cid: CId) 
             results.append(
                 {
                     "lang": sub_info["lan_doc"],
+                    "lang_code": sub_info["lan"],
                     "lines": subtitle_text["body"],
                 }
             )

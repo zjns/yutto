@@ -1,0 +1,94 @@
+name: Build
+
+on:
+  push:
+  workflow_dispatch:
+    inputs:
+      up_to_tg:
+        type: boolean
+        description: Send to Telegram?
+        required: true
+        default: 'false'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || contains(join(github.event.commits.*.message), 'release:')
+    env:
+      SEND_TO_TG: ${{ github.event.inputs.up_to_tg }}
+
+    steps:
+      - name: Check event
+        run: |
+          release="${{ contains(join(github.event.commits.*.message), 'release:') }}"
+          if [ "$release" = "true" ]; then
+            echo "SEND_TO_TG=true" >> $GITHUB_ENV
+          fi
+
+      - name: Clone
+        uses: actions/checkout@v2
+
+      - name: Setup python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9.x'
+
+      - name: Prepare python packages
+        run: |
+          pip install -U wheel
+          pip install -U pyrogram tgcrypto
+
+      - name: Setup poetry
+        uses: abatilo/actions-poetry@v2.1.3
+        with:
+          poetry-version: '1.1.12'
+
+      - name: Build dist
+        run: |
+          poetry install
+          poetry build
+
+      - name: Get yutto version
+        run: |
+          version="`poetry version -s`"
+          echo "VERSION=$version" >> $GITHUB_ENV
+
+      - name: Send to Telegram
+        shell: python
+        if: env.SEND_TO_TG == 'true'
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT }}
+          CHANNEL_ID: ${{ secrets.TELEGRAM_TO }}
+        run: |
+          import asyncio
+          import os
+          from pyrogram import Client
+          async def main():
+            bot = Client(
+              "client",
+              in_memory=True,
+              api_id=os.environ["API_ID"],
+              api_hash=os.environ["API_HASH"],
+              bot_token=os.environ["BOT_TOKEN"],
+            )
+            async with bot:
+              version = os.environ["VERSION"]
+              v = version.replace("-beta.", "b")
+              channel_id = int(os.environ["CHANNEL_ID"])
+              caption = f"#yutto {version}"
+              document = f"dist/yutto-{v}-py3-none-any.whl"
+              await bot.send_document(
+                chat_id=channel_id,
+                document=document,
+                caption=caption,
+              )
+          async def wait():
+            try:
+              await asyncio.wait_for(main(), timeout=300)
+            except asyncio.TimeoutError:
+              print("message send timeout!!!")
+              exit(1)
+          asyncio.run(wait())

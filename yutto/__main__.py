@@ -9,6 +9,7 @@ from pathlib import Path
 import aiohttp
 
 from yutto.__version__ import VERSION as yutto_version
+from yutto.actions import OnlySubtitleAction
 from yutto.bilibili_typing.quality import (
     audio_quality_priority_default,
     video_quality_priority_default,
@@ -81,6 +82,7 @@ def cli() -> argparse.ArgumentParser:
     )
     group_common.add_argument("--video-only", dest="require_audio", action="store_false", help="只下载视频")
     group_common.add_argument("--audio-only", dest="require_video", action="store_false", help="只下载音频")
+    group_common.add_argument("-so", "--subtitle-only", action=OnlySubtitleAction, help="只下载字幕")
     group_common.add_argument("-df", "--danmaku-format", default="ass", choices=["xml", "ass", "protobuf"], help="弹幕类型")
     group_common.add_argument("-bs", "--block-size", default=0.5, type=float, help="分块下载时各块大小，单位为 MiB，默认为 0.5MiB")
     group_common.add_argument("-w", "--overwrite", action="store_true", help="强制覆盖已下载内容")
@@ -94,6 +96,9 @@ def cli() -> argparse.ArgumentParser:
     )
     group_common.add_argument("--no-danmaku", action="store_true", help="不生成弹幕文件")
     group_common.add_argument("--no-subtitle", action="store_true", help="不生成字幕文件")
+    group_common.add_argument(
+        "-nps", "--no-pack-subtitle", dest="pack_subtitle", action="store_false", help="不往视频文件打包字幕"
+    )
     group_common.add_argument("--with-metadata", action="store_true", help="生成元数据文件")
     group_common.add_argument("--metadata-format", default="nfo", choices=["nfo"], help="（待实现）元数据文件类型，目前仅支持 nfo")
     group_common.add_argument("--embed-danmaku", action="store_true", help="（待实现）将弹幕文件嵌入到视频中")
@@ -196,6 +201,10 @@ async def run(args_list: list[argparse.Namespace]):
                     session,
                     episode_data,
                     {
+                        "no_subtitle": args.no_subtitle,
+                        "no_danmaku": args.no_danmaku,
+                        "with_metadata": args.with_metadata,
+                        "pack_subtitle": args.pack_subtitle,
                         "require_video": args.require_video,
                         "video_quality": args.video_quality,
                         "video_download_codec": args.vcodec.split(":")[0],
@@ -209,8 +218,8 @@ async def run(args_list: list[argparse.Namespace]):
                         "num_workers": args.num_workers,
                     },
                 )
-                Logger.new_line()
-            Logger.new_line()
+                # Logger.new_line()
+            # Logger.new_line()
 
 
 def flatten_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[argparse.Namespace]:

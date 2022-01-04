@@ -154,7 +154,13 @@ class AudioUrlMeta(TypedDict):
 
 class MultiLangSubtitle(TypedDict):
     lang: str
+    lang_code: str
     lines: SubtitleData
+
+
+class SubtitleFileInfo(TypedDict):
+    info: MultiLangSubtitle
+    path: str
 
 
 class EpisodeData(TypedDict):
@@ -171,6 +177,10 @@ class EpisodeData(TypedDict):
 
 
 class DownloaderOptions(TypedDict):
+    no_subtitle: bool
+    no_danmaku: bool
+    with_metadata: bool
+    pack_subtitle: bool
     require_video: bool
     video_quality: VideoQuality
     video_download_codec: VideoCodec
