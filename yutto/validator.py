@@ -108,9 +108,9 @@ def validate_basic_arguments(args: argparse.Namespace):
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     # video_only 和 audio_only 不能同时设置
-    if not args.require_video and not args.require_audio:
-        Logger.error("video_only 和 audio_only 不能同时设置呀！")
-        sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
+    # if not args.require_video and not args.require_audio:
+    #    Logger.error("video_only 和 audio_only 不能同时设置呀！")
+    #    sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     # 不下载视频无法嵌入字幕
     if not args.require_video and args.embed_subtitle:
@@ -123,9 +123,9 @@ def validate_basic_arguments(args: argparse.Namespace):
         sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     # 不下载视频无法生成 ASS 弹幕（ASS 弹幕生成计算依赖于视频分辨率大小）
-    if not args.require_video and not args.no_danmaku and args.danmaku_format == "ass":
-        Logger.error("不下载视频无法生成 ASS 弹幕呀！")
-        sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
+    # if not args.require_video and not args.no_danmaku and args.danmaku_format == "ass":
+    #    Logger.error("不下载视频无法生成 ASS 弹幕呀！")
+    #    sys.exit(ErrorCode.WRONG_ARGUMENT_ERROR.value)
 
     # 生成字幕才可以嵌入字幕
     if args.embed_subtitle and args.no_subtitle:

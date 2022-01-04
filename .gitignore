@@ -117,6 +117,9 @@ dmypy.json
 # macOS
 .DS_Store
 
+# IDEA
+.idea
+
 # Media files
 *.aac
 *.mp3
