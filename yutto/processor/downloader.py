@@ -8,15 +8,7 @@ from typing import Any, Coroutine, Optional, Union
 
 import aiohttp
 
-from yutto._typing import (
-    AudioUrlMeta,
-    DownloaderOptions,
-    EpisodeData,
-    VideoUrlMeta,
-    SubtitleFileInfo,
-    MultiLangSubtitle,
-)
-from yutto.api.translate import translate
+from yutto._typing import AudioUrlMeta, DownloaderOptions, EpisodeData, VideoUrlMeta, SubtitleFileInfo
 from yutto.bilibili_typing.quality import audio_quality_map, video_quality_map
 from yutto.processor.progressbar import show_progress
 from yutto.processor.selector import select_audio, select_video
@@ -28,7 +20,7 @@ from yutto.utils.ffmpeg import FFmpeg
 from yutto.utils.file_buffer import AsyncFileBuffer
 from yutto.utils.funcutils import filter_none_value, xmerge
 from yutto.utils.metadata import write_metadata
-from yutto.utils.subtitle import write_subtitle, SubtitleData
+from yutto.utils.subtitle import write_subtitle
 
 
 def slice_blocks(
@@ -319,33 +311,6 @@ async def start_downloader(
             subtitle_path = "{}_{}.srt".format(video_path_no_ext, subtitle["lang"])
             subtitle_files.append({"info": subtitle, "path": subtitle_path})
             write_subtitle(subtitle["lines"], str(output_path), subtitle["lang"])
-        # 通过繁化姬基于繁中生成简中字幕
-        lang_codes = [sub["info"]["lang_code"] for sub in subtitle_files]
-        if "zh-CN" not in lang_codes and "zh-Hant" in lang_codes:
-            hant_sub_path = next((s for s in subtitle_files if s["info"]["lang_code"] == "zh-Hant"))["path"]
-            with open(hant_sub_path, "r", encoding="utf-8") as hant_file:
-                text = hant_file.read()
-                try:
-                    trans = await translate(text)
-                    hans_path = "{}_{}[{}].srt".format(video_path_no_ext, "中文（简体）", "翻译自繁体")
-                    with open(hans_path, "w", encoding="utf-8") as hans_file:
-                        hans_file.write(trans)
-                    hans_sub_info: MultiLangSubtitle = {
-                        "lang": "中文（简体）",
-                        "lang_code": "zh-CN",
-                        "lines": SubtitleData(),
-                    }
-                    subtitles.append(hans_sub_info)
-                    subtitle_files.append({"info": hans_sub_info, "path": hans_path})
-                    Logger.custom(
-                        "通过繁化姬基于繁体的简中字幕已生成",
-                        badge=Badge("字幕", fore="black", back="cyan"),
-                    )
-                except Exception:
-                    Logger.custom(
-                        "通过繁化姬基于繁体的简中字幕生成失败",
-                        badge=Badge("字幕", fore="black", back="red"),
-                    )
         Logger.custom(
             "{}字幕已全部生成".format(", ".join([subtitle["lang"] for subtitle in subtitles])),
             badge=Badge("字幕", fore="black", back="cyan"),
