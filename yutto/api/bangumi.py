@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, TypedDict
+from urllib.parse import quote
 
 from aiohttp import ClientSession
 
@@ -133,7 +134,22 @@ async def get_bangumi_subtitles(session: ClientSession, avid: AvId, cid: CId) ->
         return []
     subtitles_info = subtitles_json_info["data"]["subtitle"]
     results: list[MultiLangSubtitle] = []
-    for sub_info in subtitles_info["subtitles"]:
+    subtitles = subtitles_info["subtitles"]
+    lang_codes = [s["lan"] for s in subtitles]
+
+    if "zh-CN" not in lang_codes and "zh-Hant" in lang_codes:
+        hant_sub = next(s for s in subtitles if s["lan"] == "zh-Hant")
+        hant_url = quote(f"http:{hant_sub['subtitle_url']}", encoding="utf-8")
+        hant_id = quote(hant_sub["id_str"], encoding="utf-8")
+        hans_url = "//www.kofua.top/bsub/t2cn?sub_url={}&sub_id={}&append_info=0".format(hant_url, hant_id)
+        hans_sub = {
+            "lan": "zh-CN",
+            "lan_doc": "中文（中国）| 繁化姬",
+            "subtitle_url": hans_url,
+        }
+        subtitles.append(hans_sub)
+
+    for sub_info in subtitles:
         subtitle_text = await Fetcher.fetch_json(session, "https:" + sub_info["subtitle_url"])
         if subtitle_text is None:
             continue
