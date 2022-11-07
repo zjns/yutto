@@ -8,7 +8,7 @@ on:
         type: boolean
         description: Send to Telegram?
         required: true
-        default: 'false'
+        default: false
 
 jobs:
   build:
@@ -27,19 +27,19 @@ jobs:
           fi
 
       - name: Clone
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
-      - name: Setup python
-        uses: actions/setup-python@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.9.x'
 
-      - name: Prepare python packages
+      - name: Prepare Python packages
         run: |
           pip install -U wheel
           pip install -U pyrogram tgcrypto
 
-      - name: Setup poetry
+      - name: Set up poetry
         uses: abatilo/actions-poetry@v2.1.3
         with:
           poetry-version: '1.1.12'
