@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 from typing import Optional, TypedDict
-from urllib.parse import quote
 
 from aiohttp import ClientSession
 
@@ -228,22 +227,7 @@ async def get_ugc_video_subtitles(session: ClientSession, avid: AvId, cid: CId) 
     if subtitle_json_text_match := re.search(r"<subtitle>(.+)</subtitle>", res_text):
         subtitle_json = json.loads(subtitle_json_text_match.group(1))
         results: list[MultiLangSubtitle] = []
-        subtitles = subtitle_json["subtitles"]
-        lang_codes = [s["lan"] for s in subtitles]
-
-        if "zh-CN" not in lang_codes and "zh-Hant" in lang_codes:
-            hant_sub = next(s for s in subtitles if s["lan"] == "zh-Hant")
-            hant_url = quote(f"http:{hant_sub['subtitle_url']}", encoding="utf-8")
-            hant_id = quote(hant_sub["id_str"], encoding="utf-8")
-            hans_url = "//www.kofua.top/bsub/t2cn?sub_url={}&sub_id={}&append_info=0".format(hant_url, hant_id)
-            hans_sub = {
-                "lan": "zh-CN",
-                "lan_doc": "中文（中国）| 繁化姬",
-                "subtitle_url": hans_url,
-            }
-            subtitles.append(hans_sub)
-
-        for sub_info in subtitles:
+        for sub_info in subtitle_json["subtitles"]:
             subtitle_text = await Fetcher.fetch_json(session, "https:" + sub_info["subtitle_url"])
             if subtitle_text is None:
                 continue
